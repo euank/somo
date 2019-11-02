@@ -19,17 +19,13 @@ fn main() {
         .arg(Arg::with_name("trailing").multiple(true))
         .get_matches();
 
-    // TODO: signal configuration
-
     // TODO: parent death signal if not pid1
-
     // TODO: subreaper if not pid1
-
     // TODO: reaper check
 
     let restart_exit_code = match opts.value_of("restart-exit-code") {
         None => None,
-        Some(s) => Some(s.parse::<u32>().expect("could not parse restart-exit-code")),
+        Some(s) => Some(s.parse::<i32>().expect("could not parse restart-exit-code")),
     };
 
     let cmd: Vec<_> = opts
@@ -47,7 +43,6 @@ fn main() {
 
     let mut parent_sigs = signal::SigSet::all();
     for signal in vec![
-        signal::Signal::SIGFPE,
         signal::Signal::SIGFPE,
         signal::Signal::SIGILL,
         signal::Signal::SIGSEGV,
@@ -108,8 +103,6 @@ fn main() {
                 Ok(_) => {}
             };
 
-            // restore Signals
-            // TODO: error handling
             signal::sigprocmask(
                 signal::SigmaskHow::SIG_SETMASK,
                 Some(&original_signals),
@@ -122,16 +115,22 @@ fn main() {
             Ok(())
         });
     }
-    let result = child.spawn().unwrap();
-    let child_pid = result.id();
 
-    let mut exitcode = None;
-    while exitcode.is_none() {
-        wait_and_forward_signal(parent_sigs, child_pid).unwrap();
-        exitcode = reap_zombies(child_pid).unwrap();
+
+    loop {
+        let result = child.spawn().unwrap();
+        let child_pid = result.id();
+
+        let mut exitcode = None;
+        while exitcode.is_none() {
+            wait_and_forward_signal(parent_sigs, child_pid).unwrap();
+            exitcode = reap_zombies(child_pid).unwrap();
+        }
+        if exitcode != restart_exit_code {
+            std::process::exit(exitcode.unwrap());
+        }
+        debug!("process exited with exitcode {}; restarting", exitcode.unwrap());
     }
-
-    std::process::exit(exitcode.unwrap());
 }
 
 fn reap_zombies(child_pid: u32) -> Result<Option<i32>, String> {
